@@ -38,7 +38,7 @@ def main():
 
         if lex_flag:
             rpal_parser.parse()
-            if not rpal_parser.is_parsing_complete():
+            if not rpal_parser.isParsingComplete():
                 print("Error: Parsing is not complete")
                 return 1
 

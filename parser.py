@@ -358,7 +358,7 @@ class Parser:
         self.parsing_complete = True
 
     def isParsingComplete(self):
-        return self.parsingComplete
+        return self.parsing_complete
 
 
     def MST(self,t):
