@@ -285,14 +285,14 @@ class Parser:
             #print(f"Top of stack: {t.get_value() if t else 'None'}")
 
             if self.ast_flag == 1 and t:
-                t.displaySyntaxTree(0)
+                t.display_syntax_tree(0)
 
             if t:
                 self.MST(t)
                 print("Made standard tree (MST) from syntax tree.")
 
                 if self.ast_flag == 2:
-                    t.displaySyntaxTree(0)
+                    t.display_syntax_tree(0)
 
                 controlStructureArray = [[None] * 200 for _ in range(200)]
                 self.build_control_structures(t, controlStructureArray)
@@ -334,12 +334,12 @@ class Parser:
             t = self.st[-1]
 
             if self.ast_flag == 1:
-                t.displaySyntaxTree(0)
+                t.display_syntax_tree(0)
 
             self.MST(t)
 
             if self.ast_flag == 2:
-                t.displaySyntaxTree(0)
+                t.display_syntax_tree(0)
 
             controlStructureArray = [[None] * 200 for _ in range(200)]
             self.build_control_structures(t, controlStructureArray)
