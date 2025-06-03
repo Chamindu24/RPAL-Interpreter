@@ -48,6 +48,8 @@ class Parser:
         self.control_structures_column = 0
         self.control_structures_row = 0
         self.control_structures_beta = 1
+        self.controlNodeArray = [[None for _ in range(200)] for _ in range(200)]
+        self.cse_flag = 0
         
 
         
@@ -366,229 +368,236 @@ class Parser:
 
 
     def makeStandardTree(self, t):
-        
         if t is None:
             return None
-        #print(f"makeStandardTree: Processing node with value={t.get_value()} and type={t.get_type()}")
+        
+        # Debug: Trace the node being processed
+        # print(f"makeStandardTree: Processing node with value={t.get_value()}, type={t.get_type()}")
 
+        # Recursively standardize left and right subtrees
         self.makeStandardTree(t.left_node)
         self.makeStandardTree(t.right_node)
 
         val = t.get_value()
+        # print(f"makeStandardTree: Transforming node: value={val}")
 
         if val == "let":
-            if t.left_node.get_value() == "=":
+            if t.left_node and t.left_node.get_value() == "=":
+                # Transform let X = E in P to gamma(lambda(X, P), E)
                 t.set_value("gamma")
                 t.set_type("KEYWORD")
-                P = Tree.build_node(t.left_node.right_node.get_value(), t.left_node.right_node.get_type())
-                X = Tree.build_node(t.left_node.left_node.get_value(), t.left_node.left_node.get_type())
-                E = Tree.build_node(t.left_node.left_node.right_node.get_value(), t.left_node.left_node.right_node.get_type())
+                P = t.left_node.right_node  # Entire P subtree
+                X = t.left_node.left_node   # Entire X subtree
+                E = t.left_node.left_node.right_node  # Entire E subtree
                 t.left_node = Tree.build_node("lambda", "KEYWORD")
-                t.left_node.right_node = E
-                lambda_node = t.left_node
-                lambda_node.left_node = X
-                lambda_node.left_node.right_node = P
+                t.left_node.right_node = P
+                t.left_node.left_node = X
+                t.left_node.left_node.right_node = E
+                # print(f"makeStandardTree: Transformed 'let' to gamma-lambda structure")
 
-        elif val == "and" and t.left_node.get_value() == "=":
+        elif val == "and" and t.left_node and t.left_node.get_value() == "=":
+            # Transform and (X1=E1, X2=E2, ...) to =(, (X1, X2, ...), tau(E1, E2, ...))
             equal = t.left_node
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = Tree.build_node(",", "PUNCTUATION")
             comma = t.left_node
-            comma.left_node = Tree.build_node(equal.left_node.get_value(), equal.left_node.get_type())
+            comma.left_node = equal.left_node  # First variable
             t.left_node.right_node = Tree.build_node("tau", "KEYWORD")
             tau = t.left_node.right_node
-
-            tau.left_node = Tree.build_node(equal.left_node.right_node.get_value(), equal.left_node.right_node.get_type())
-            tau = tau.left_node
-            comma = comma.left_node
+            tau.left_node = equal.left_node.right_node  # First expression
+            tau_current = tau.left_node
+            comma_current = comma.left_node
             equal = equal.right_node
 
             while equal is not None:
-                comma.right_node = Tree.build_node(equal.left_node.get_value(), equal.left_node.get_type())
-                comma = comma.right_node
-                tau.right_node = Tree.build_node(equal.left_node.right_node.get_value(), equal.left_node.right_node.get_type())
-                tau = tau.right_node
-
+                comma_current.right_node = equal.left_node
+                comma_current = comma_current.right_node
+                tau_current.right_node = equal.left_node.right_node
+                tau_current = tau_current.right_node
                 equal = equal.right_node
+            # print(f"makeStandardTree: Transformed 'and' to =-comma-tau structure")
 
         elif val == "where":
-            t.set_value("gamma")
-            t.set_type("KEYWORD")
-            if t.left_node.right_node.get_value() == "=":
-                P = Tree.build_node(t.left_node.get_value(), t.left_node.get_type())
-                X = Tree.build_node(t.left_node.right_node.left_node.get_value(), t.left_node.right_node.left_node.get_type())
-                E = Tree.build_node(t.left_node.right_node.left_node.right_node.get_value(), t.left_node.right_node.left_node.right_node.get_type())
+            if t.left_node and t.left_node.right_node and t.left_node.right_node.get_value() == "=":
+                # Transform P where X = E to gamma(lambda(X, P), E)
+                t.set_value("gamma")
+                t.set_type("KEYWORD")
+                P = t.left_node  # Entire P subtree
+                X = t.left_node.right_node.left_node
+                E = t.left_node.right_node.left_node.right_node
                 t.left_node = Tree.build_node("lambda", "KEYWORD")
-                t.left_node.right_node = E
+                t.left_node.right_node = P
                 t.left_node.left_node = X
-                t.left_node.left_node.right_node = P
+                t.left_node.left_node.right_node = E
+                # print(f"makeStandardTree: Transformed 'where' to gamma-lambda structure")
 
         elif val == "within":
-            if t.left_node.get_value() == "=" and t.left_node.right_node.get_value() == "=":
-                X1 = Tree.build_node(t.left_node.left_node.get_value(), t.left_node.left_node.get_type())
-                E1 = Tree.build_node(t.left_node.left_node.right_node.get_value(), t.left_node.left_node.right_node.get_type())
-                X2 = Tree.build_node(t.left_node.right_node.left_node.get_value(), t.left_node.right_node.left_node.get_type())
-                E2 = Tree.build_node(t.left_node.right_node.left_node.right_node.get_value(), t.left_node.right_node.left_node.right_node.get_type())
+            if t.left_node and t.left_node.get_value() == "=" and t.left_node.right_node and t.left_node.right_node.get_value() == "=":
+                # Transform X1 = E1 within X2 = E2 to =(X2, gamma(lambda(X1, E2), E1))
+                X1 = t.left_node.left_node
+                E1 = t.left_node.left_node.right_node
+                X2 = t.left_node.right_node.left_node
+                E2 = t.left_node.right_node.left_node.right_node
                 t.set_value("=")
                 t.set_type("KEYWORD")
                 t.left_node = X2
                 t.left_node.right_node = Tree.build_node("gamma", "KEYWORD")
                 temp = t.left_node.right_node
                 temp.left_node = Tree.build_node("lambda", "KEYWORD")
-                temp.left_node.right_node = E1
-                temp = temp.left_node
-                temp.left_node = X1
                 temp.left_node.right_node = E2
+                temp.left_node.left_node = X1
+                temp.left_node.left_node.right_node = E1
+                # print(f"makeStandardTree: Transformed 'within' to =-gamma-lambda structure")
 
-        elif val == "rec" and t.left_node.get_value() == "=":
-            X = Tree.build_node(t.left_node.left_node.get_value(), t.left_node.left_node.get_type())
-            E = Tree.build_node(t.left_node.left_node.right_node.get_value(), t.left_node.left_node.right_node.get_type())
-
+        elif val == "rec" and t.left_node and t.left_node.get_value() == "=":
+            # Transform rec X = E to =(X, gamma(YSTAR, lambda(X, E)))
+            X = t.left_node.left_node
+            E = t.left_node.left_node.right_node
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = X
             t.left_node.right_node = Tree.build_node("gamma", "KEYWORD")
-            t.left_node.right_node.left_node = Tree.build_node("YSTAR", "KEYWORD")
-            ystar = t.left_node.right_node.left_node
-
+            gamma = t.left_node.right_node
+            gamma.left_node = Tree.build_node("YSTAR", "KEYWORD")
+            ystar = gamma.left_node
             ystar.right_node = Tree.build_node("lambda", "KEYWORD")
-
-            ystar.right_node.left_node = Tree.build_node(X.get_value(), X.get_type())
-            ystar.right_node.left_node.right_node = Tree.build_node(E.get_value(), E.get_type())
+            ystar.right_node.left_node = X
+            ystar.right_node.left_node.right_node = E
+            # print(f"makeStandardTree: Transformed 'rec' to =-gamma-YSTAR-lambda structure")
 
         elif val == "function_form":
-            P = Tree.build_node(t.left_node.get_value(), t.left_node.get_type())
+            # Transform function_form P V1 V2 ... Vn E to =(P, lambda(V1, lambda(V2, ... lambda(Vn, E))))
+            P = t.left_node
             V = t.left_node.right_node
-
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = P
-
             temp = t
-            while V.right_node and V.right_node.right_node is not None:
+            while V and V.right_node and V.right_node.right_node is not None:
                 temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
                 temp = temp.left_node.right_node
-                temp.left_node = Tree.build_node(V.get_value(), V.get_type())
+                temp.left_node = V
                 V = V.right_node
-
             temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
             temp = temp.left_node.right_node
-
-            temp.left_node = Tree.build_node(V.get_value(), V.get_type())
+            temp.left_node = V
             temp.left_node.right_node = V.right_node
+            # print(f"makeStandardTree: Transformed 'function_form' to =-lambda chain")
 
         elif val == "lambda":
             if t.left_node is not None:
+                # Transform lambda V1 V2 ... Vn E to lambda(V1, lambda(V2, ... lambda(Vn, E)))
                 V = t.left_node
                 temp = t
-                if V.right_node is not None and V.right_node.right_node is not None:
-                    while V.right_node.right_node is not None:
-                        temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
-                        temp = temp.left_node.right_node
-                        temp.left_node = Tree.build_node(V.get_value(), V.get_type())
-                        V = V.right_node
-
+                while V.right_node and V.right_node.right_node is not None:
                     temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
                     temp = temp.left_node.right_node
-                    temp.left_node = Tree.build_node(V.get_value(), V.get_type())
-                    temp.left_node.right_node = V.right_node
+                    temp.left_node = V
+                    V = V.right_node
+                temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
+                temp = temp.left_node.right_node
+                temp.left_node = V
+                temp.left_node.right_node = V.right_node
+                # print(f"makeStandardTree: Transformed 'lambda' with multiple parameters")
 
         elif val == "@":
-            E1 = Tree.build_node(t.left_node.get_value(), t.left_node.get_type())
-            N = Tree.build_node(t.left_node.right_node.get_value(), t.left_node.right_node.get_type())
-            E2 = Tree.build_node(t.left_node.right_node.right_node.get_value(), t.left_node.right_node.right_node.get_type())
-            t.set_value("gamma")
-            t.set_type("KEYWORD")
-            t.left_node = Tree.build_node("gamma", "KEYWORD")
-            t.left_node.right_node = E2
-            t.left_node.left_node = N
-            t.left_node.left_node.right_node = E1
+            if t.left_node and t.left_node.right_node and t.left_node.right_node.right_node:
+                # Transform E1 @ N E2 to gamma(gamma(N, E1), E2)
+                E1 = t.left_node
+                N = t.left_node.right_node
+                E2 = t.left_node.right_node.right_node
+                t.set_value("gamma")
+                t.set_type("KEYWORD")
+                t.left_node = Tree.build_node("gamma", "KEYWORD")
+                t.left_node.right_node = E2
+                t.left_node.left_node = N
+                t.left_node.left_node.right_node = E1
+                # print(f"makeStandardTree: Transformed '@' to gamma-gamma structure")
 
         return None
     
     def build_control_structures(self, x, controlNodeArray):
-        # Base case
+        """Recursively builds control structures from AST nodes"""
         if x is None:
             return
 
         row = self.control_structures_row
         column = self.control_structures_column
 
-        # Handle the current node
-        if column >= 200:  # Prevent column overflow
+        # Handle column overflow
+        if column >= 200:
             row += 1
             column = 0
+            self.control_structures_row = row
 
         if row >= 200:  # Prevent row overflow
             return
 
+        # Create node and add to control structure
         controlNodeArray[row][column] = Tree.build_node(x.get_value(), x.get_type())
         column += 1
 
-        # Process children recursively
-        if x.left_node:
-            self.build_control_structures(x.left_node, controlNodeArray)
-        if x.right_node:
-            self.build_control_structures(x.right_node, controlNodeArray)
-
-        # Update instance variables
-        self.control_structures_row = row
+        # Update position
         self.control_structures_column = column
 
+        # Process children recursively
+        if hasattr(x, 'left_node') and x.left_node:
+            self.build_control_structures(x.left_node, controlNodeArray)
+        if hasattr(x, 'right_node') and x.right_node:
+            self.build_control_structures(x.right_node, controlNodeArray)
+
     def build_node(self, x, value, node_type):
-        print(f"build_node: Creating node with value={value}, type={node_type}")
+        """Builds control structures for special node types"""
+        print(f"build_node: Processing {x.get_value()} with value={value}, type={node_type}")
 
         # Handle lambda nodes
         if x.get_value() == "lambda":
-            import io
-            ss = io.StringIO()
-
             row = self.control_structures_row
             column = self.control_structures_column
             index = self.control_structures_index
-            betaCount = self.control_structures_beta
 
-            t_var_1 = row
+            # Count existing rows to determine delta number
             counter = 0
-            self.controlNodeArray[row][column] = Tree.build_node("", "")
-            self.control_structures_row = 0
-
-            # Count rows in controlNodeArray where first column is not None
-            while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
-                row += 1
+            temp_row = 0
+            while temp_row < len(self.controlNodeArray) and self.controlNodeArray[temp_row][0] is not None:
+                temp_row += 1
                 counter += 1
-            self.control_structures_row = t_var_1
 
-            ss.write(str(counter))
-            index += 1
-            str_val = ss.getvalue()
-            temp = Tree.build_node(str_val, "deltaNumber")
-
-            self.controlNodeArray[row][column] = temp
+            # Create delta number node
+            delta_num = Tree.build_node(str(counter), "deltaNumber")
+            self.controlNodeArray[row][column] = delta_num
             column += 1
 
-            self.controlNodeArray[row][column] = x.left_node
+            # Add bound variable
+            if hasattr(x, 'left_node') and x.left_node:
+                self.controlNodeArray[row][column] = Tree.build_node(x.left_node.get_value(), x.left_node.get_type())
+                column += 1
+
+            # Add lambda node
+            self.controlNodeArray[row][column] = Tree.build_node("lambda", "lambda")
             column += 1
 
-            self.controlNodeArray[row][column] = x
-            column += 1
+            # Save current position
+            saved_row = row
+            saved_column = column
 
-            saved_index = row
-            tempj = column + 3
-
-            # Move row to next empty
+            # Move to next available row for lambda body
             while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
                 row += 1
-            column = 0
 
-            # Recursive call
-            self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
+            # Update position for recursion
+            self.control_structures_row = row
+            self.control_structures_column = 0
+            self.control_structures_index = index + 1
 
-            self.control_structures_row = saved_index
-            self.control_structures_column = tempj
-            self.control_structures_index = index
-            self.control_structures_beta = betaCount
+            # Process lambda body
+            if hasattr(x, 'left_node') and x.left_node and hasattr(x.left_node, 'right_node'):
+                self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
+
+            # Restore position
+            self.control_structures_row = saved_row
+            self.control_structures_column = saved_column
             return
 
         # Handle conditional nodes "->"
@@ -596,96 +605,95 @@ class Parser:
             row = self.control_structures_row
             column = self.control_structures_column
             index = self.control_structures_index
-            betaCount = self.control_structures_beta
 
-            saved_index = row
-            tempj = column
-            nextDelta = index
-            counter = row
+            # Create delta numbers for then and else branches
+            then_delta = Tree.build_node(str(index), "deltaNumber")
+            else_delta = Tree.build_node(str(index + 1), "deltaNumber")
+            beta_node = Tree.build_node("beta", "beta")
 
-            ss2 = str(nextDelta)
-            temp1 = Tree.build_node(ss2, "deltaNumber")
-            self.controlNodeArray[row][column] = temp1
+            self.controlNodeArray[row][column] = then_delta
+            column += 1
+            self.controlNodeArray[row][column] = else_delta
+            column += 1
+            self.controlNodeArray[row][column] = beta_node
             column += 1
 
-            nextToNextDelta = index
-            ss3 = str(nextToNextDelta)
-            temp2 = Tree.build_node(ss3, "deltaNumber")
-            self.controlNodeArray[row][column] = temp2
-            column += 1
+            # Save current state
+            saved_row = row
+            saved_column = column
 
-            beta = Tree.build_node("beta", "beta")
-            self.controlNodeArray[row][column] = beta
-            column += 1
+            # Process condition first
+            if hasattr(x, 'left_node') and x.left_node:
+                self.build_control_structures(x.left_node, self.controlNodeArray)
 
-            # Count rows with first column not None
-            while counter < len(self.controlNodeArray) and self.controlNodeArray[counter][0] is not None:
-                counter += 1
-            firstIndex = counter
-            lamdaCount = index
-
-            self.build_control_structures(x.left_node, self.controlNodeArray)
-            diffLc = index - lamdaCount
-
-            # Move row to next empty
+            # Move to next row for then branch
             while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
                 row += 1
-            column = 0
+            
+            then_row = row
+            self.control_structures_row = row
+            self.control_structures_column = 0
+            self.control_structures_index = index + 2
 
-            self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
+            # Process then branch
+            if (hasattr(x, 'left_node') and x.left_node and 
+                hasattr(x.left_node, 'right_node') and x.left_node.right_node):
+                self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
 
+            # Move to next row for else branch
             while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
                 row += 1
-            column = 0
 
-            self.build_control_structures(x.left_node.right_node.right_node, self.controlNodeArray)
-
-            # Update controlNodeArray at saved_index, tempj and tempj + 1
-            if diffLc == 0 or row < lamdaCount:
-                str5 = str(firstIndex)
-            else:
-                str5 = str(row - 1)
-
-            self.controlNodeArray[saved_index][tempj].set_value(str5)
-            str6 = str(row)
-            self.controlNodeArray[saved_index][tempj + 1].set_value(str6)
-
-            self.control_structures_row = saved_index
+            else_row = row
+            self.control_structures_row = row
             self.control_structures_column = 0
 
-            while column < len(self.controlNodeArray[row]) and self.controlNodeArray[row][column] is not None:
-                column += 1
+            # Process else branch
+            if (hasattr(x, 'left_node') and x.left_node and 
+                hasattr(x.left_node, 'right_node') and x.left_node.right_node and
+                hasattr(x.left_node.right_node, 'right_node') and x.left_node.right_node.right_node):
+                self.build_control_structures(x.left_node.right_node.right_node, self.controlNodeArray)
 
-            betaCount += 2
+            # Update delta numbers with actual row indices
+            self.controlNodeArray[saved_row][saved_column - 3].set_value(str(then_row))
+            self.controlNodeArray[saved_row][saved_column - 2].set_value(str(else_row))
 
-            self.control_structures_index = index
-            self.control_structures_beta = betaCount
+            # Restore position
+            self.control_structures_row = saved_row
+            self.control_structures_column = saved_column
+            self.control_structures_beta += 2
             return
 
-        # Handle tau nodes
+        # Handle tau nodes (tuples)
         elif x.get_value() == "tau":
             row = self.control_structures_row
             column = self.control_structures_column
 
-            tauLeft = x.left_node
-            numOfChildren = 0
-            while tauLeft is not None:
-                numOfChildren += 1
-                tauLeft = tauLeft.right_node
+            # Count children
+            child_count = 0
+            current = x.left_node if hasattr(x, 'left_node') else None
+            while current:
+                child_count += 1
+                current = current.right_node if hasattr(current, 'right_node') else None
 
-            countNode = Tree.build_node(str(numOfChildren), "CHILDCOUNT")
-            self.controlNodeArray[row][column] = countNode
+            # Add count and tau node
+            count_node = Tree.build_node(str(child_count), "CHILDCOUNT")
+            tau_node = Tree.build_node("tau", "tau")
+            
+            self.controlNodeArray[row][column] = count_node
+            column += 1
+            self.controlNodeArray[row][column] = tau_node
             column += 1
 
-            tauNode = Tree.build_node("tau", "tau")
-            self.controlNodeArray[row][column] = tauNode
-            column += 1
+            # Update position
+            self.control_structures_row = row
+            self.control_structures_column = column
 
-            self.build_control_structures(x.left_node, self.controlNodeArray)
-            x_iter = x.left_node
-            while x_iter is not None:
-                self.build_control_structures(x_iter.right_node, self.controlNodeArray)
-                x_iter = x_iter.right_node
+            # Process all children
+            current = x.left_node if hasattr(x, 'left_node') else None
+            while current:
+                self.build_control_structures(current, self.controlNodeArray)
+                current = current.right_node if hasattr(current, 'right_node') else None
 
             return
 
@@ -694,331 +702,330 @@ class Parser:
             row = self.control_structures_row
             column = self.control_structures_column
 
-            self.controlNodeArray[row][column] = Tree.build_node(x.get_value(), x.get_type())
-            column += 1
-            self.build_control_structures(x.left_node, self.controlNodeArray)
-            if x.left_node is not None:
-                self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
+            if column >= 200:
+                row += 1
+                column = 0
+                self.control_structures_row = row
 
-        # Update static variables before returning
-        self.control_structures_row = row
-        self.control_structures_column = column
-        self.control_structures_index = index
-        self.control_structures_beta = betaCount
+            if row < 200:
+                self.controlNodeArray[row][column] = Tree.build_node(x.get_value(), x.get_type())
+                column += 1
+                self.control_structures_column = column
+
+                # Process children
+                if hasattr(x, 'left_node') and x.left_node:
+                    self.build_control_structures(x.left_node, self.controlNodeArray)
+                if hasattr(x, 'right_node') and x.right_node:
+                    self.build_control_structures(x.right_node, self.controlNodeArray)
 
     def cse_machine(self, control_struct):
+        """Main CSE machine execution engine"""
         print("Starting CSE machine execution...")
         
-        # Initialize stacks and environment
-        if not control_struct:
-            print("Error: Empty control structure - nothing to execute")
+        if not control_struct or len(control_struct) == 0:
+            print("Error: Empty control structure")
             return
 
+        # Initialize stacks and environment
         control = deque()
         machine_stack = deque()
         environment_stack = deque()
-        environment_tracker = deque()
 
         curr_env_index = 0
-        curr_env = Environment()  # Fixed: Use self.Environment()
-        curr_env.name = "env0"
-
+        curr_env = Environment(name="env0")
+        
         curr_env_index += 1
         machine_stack.append(Tree.build_node(curr_env.name, "ENV"))
         control.append(Tree.build_node(curr_env.name, "ENV"))
         environment_stack.append(curr_env)
-        environment_tracker.append(curr_env)
 
-        # Load initial control structure - FIXED: Only load once
+        # Load initial control structure
         if control_struct and len(control_struct) > 0:
-            cor_control_struct = control_struct[0]
-            for node in reversed(cor_control_struct):  # Reverse to maintain order
-                if node:
-                    control.append(node)
+            initial_control = control_struct[0]
+            for i in range(len(initial_control) - 1, -1, -1):  # Reverse order
+                if initial_control[i] is not None:
+                    control.append(initial_control[i])
 
-        print(f"Initial control stack: {[node.get_value() for node in control]}")
-        print(f"Initial machine stack: {[node.get_value() for node in machine_stack]}")
+        print(f"Initial control stack: {[node.get_value() if node else 'None' for node in control]}")
+        print(f"Initial machine stack: {[node.get_value() if node else 'None' for node in machine_stack]}")
 
-        # MAIN EXECUTION LOOP - FIXED: Single loop, no restarts
+        # Main execution loop
         while control:
-            next_token = control.pop()
-            print(f"Processing token: {next_token.get_value()} ({next_token.get_type()})")
-            print(f"Control stack: {[node.get_value() for node in control]}")
-            print(f"Machine stack: {[node.get_value() for node in machine_stack]}")
+            try:
+                next_token = control.pop()
+                if not next_token:
+                    continue
+                    
+                print(f"\nProcessing token: {next_token.get_value()} ({next_token.get_type()})")
+                print(f"Control stack: {[node.get_value() if node else 'None' for node in list(control)[-5:]]}")  # Show last 5
+                print(f"Machine stack: {[node.get_value() if node else 'None' for node in list(machine_stack)[-5:]]}")  # Show last 5
 
-            # Handle nil tokens
-            if next_token.get_value() == "nil":
-                next_token.set_type("tau")
+                # Handle nil tokens
+                if next_token.get_value() == "nil":
+                    next_token.set_type("tau")
 
-            # Handle operands and built-in functions
-            if (next_token.get_type() in ["INT", "STR", "BOOL", "NIL", "DUMMY"] or 
-                next_token.get_value() in ["lambda", "YSTAR", "Print", "Isinteger", "Istruthvalue", 
-                                        "Isstring", "Istuple", "Isfunction", "Isdummy", "Stem", 
-                                        "Stern", "Conc", "Order", "nil"]):
-                
-                if next_token.get_value() == "lambda":
-                    # FIXED: Proper lambda handling
-                    if len(control) < 2:
-                        print(f"Warning: Insufficient tokens in control stack for lambda. Available: {len(control)}")
+                # Handle operands and built-in functions
+                if (next_token.get_type() in ["INT", "STR", "BOOL", "NIL", "DUMMY"] or 
+                    next_token.get_value() in ["lambda", "YSTAR", "Print", "Isinteger", "Istruthvalue", 
+                                            "Isstring", "Istuple", "Isfunction", "Isdummy", "Stem", 
+                                            "Stern", "Conc", "Order", "nil"]):
+                    
+                    if next_token.get_value() == "lambda":
+                        # Lambda requires environment, variable, and delta index
+                        if len(control) < 2:
+                            print(f"Warning: Insufficient tokens for lambda")
+                            machine_stack.append(next_token)
+                            continue
+                        
+                        bound_variable = control.pop()
+                        delta_index = control.pop()
+                        env_node = Tree.build_node(curr_env.name, "ENV")
+                        
+                        # Push in correct order: delta, variable, env, lambda
+                        machine_stack.append(delta_index)
+                        machine_stack.append(bound_variable)
+                        machine_stack.append(env_node)
                         machine_stack.append(next_token)
-                        continue
-                    
-                    bound_variable = control.pop()
-                    next_delta_index = control.pop()
-                    env = Tree.build_node(curr_env.name, "ENV")
-                    machine_stack.extend([next_delta_index, bound_variable, env, next_token])
-                else:
-                    machine_stack.append(next_token)
-
-            # Handle gamma instruction
-            elif next_token.get_value() == "gamma":
-                if not machine_stack:
-                    print("Error: Machine stack empty during gamma processing")
-                    continue  # FIXED: Continue instead of return to avoid premature exit
-                    
-                machine_top = machine_stack[-1]
-                
-                if machine_top.get_value() == "lambda":  # Apply lambda (CSE Rule 4)
-                    machine_stack.pop()  # Pop lambda
-                    if len(machine_stack) < 3:
-                        print("Error: Insufficient tokens in machine stack for lambda application")
-                        continue  # FIXED: Continue instead of return
-                        
-                    prev_env = machine_stack.pop()
-                    bound_variable = machine_stack.pop()
-                    next_delta_index = machine_stack.pop()
-
-                    # Create new environment
-                    new_env = self.Environment()  # FIXED: Use self.Environment()
-                    new_env.name = f"env{curr_env_index}"
-
-                    # Find previous environment
-                    temp_env = list(environment_stack)
-                    while temp_env and temp_env[-1].name != prev_env.get_value():
-                        temp_env.pop()
-                    if temp_env:
-                        new_env.prev = temp_env[-1]
-
-                    # Bind variables to environment
-                    if bound_variable.get_value() == "," and machine_stack and machine_stack[-1].get_value() == "tau":
-                        # Handle multiple parameter binding
-                        bound_variables = []
-                        left_of_comma = bound_variable.left_node
-                        while left_of_comma:
-                            bound_variables.append(Tree.build_node(left_of_comma.get_value(), left_of_comma.get_type()))
-                            left_of_comma = left_of_comma.right_node
-
-                        bound_values = []
-                        tau = machine_stack.pop()
-                        tau_left = tau.left_node
-                        while tau_left:
-                            bound_values.append(tau_left)
-                            tau_left = tau_left.right_node
-
-                        for var, val in zip(bound_variables, bound_values):
-                            if val.get_value() == "tau":
-                                res = deque()
-                                self.arrangeTuple(val, res)
-                            new_env.boundVariable[var] = [val]
-
-                    elif machine_stack and machine_stack[-1].get_value() == "lambda":
-                        # Handle lambda binding
-                        node_value_vector = []
-                        temp = deque()
-                        for _ in range(min(4, len(machine_stack))):
-                            temp.append(machine_stack.pop())
-                        while temp:
-                            node_value_vector.append(temp.pop())
-                        new_env.boundVariable[bound_variable] = node_value_vector
-
                     else:
-                        # Handle simple binding
-                        if machine_stack:
-                            bound_val = machine_stack.pop()
-                            new_env.boundVariable[bound_variable] = [bound_val]
+                        machine_stack.append(next_token)
 
-                    # Update current environment
-                    curr_env = new_env
-                    control.append(Tree.build_node(curr_env.name, "ENV"))
-                    machine_stack.append(Tree.build_node(curr_env.name, "ENV"))
-                    environment_stack.append(curr_env)
-                    environment_tracker.append(curr_env)
-
-                    # Load next control structure - FIXED: Better error handling
-                    try:
-                        next_control_index = int(next_delta_index.get_value())
-                        if 0 <= next_control_index < len(control_struct):
-                            next_delta = control_struct[next_control_index]
-                            for node in reversed(next_delta):  # Reverse to maintain order
-                                if node:  # FIXED: Check node exists
-                                    control.append(node)
-                        else:
-                            print(f"Warning: Control structure index {next_control_index} out of range")
-                    except (ValueError, IndexError) as e:
-                        print(f"Error loading control structure: {e}")
-                        
-                    curr_env_index += 1
-
-                elif machine_top.get_value() == "tau":
-                    tau = machine_stack.pop()
+                # Handle gamma instruction
+                elif next_token.get_value() == "gamma":
                     if not machine_stack:
-                        print("Error: No index for tuple selection")
-                        continue  # FIXED: Continue instead of return
-                    child_index = machine_stack.pop()
-                    try:
-                        tuple_index = int(child_index.get_value())
-                        tau_left = tau.left_node
-                        for _ in range(tuple_index - 1):
-                            if tau_left:
-                                tau_left = tau_left.right_node
-                        if tau_left:
-                            selected_child = Tree.build_node(tau_left.get_value(), tau_left.get_type())
-                            machine_stack.append(selected_child)
-                    except (ValueError, AttributeError) as e:
-                        print(f"Error in tuple selection: {e}")
-
-                # Add other gamma cases here (YSTAR, built-in functions, etc.)
-
-            # Handle environment restoration
-            elif next_token.get_value().startswith("env"):
-                stack_to_restore = deque()
-                if machine_stack and machine_stack[-1].get_value() == "lambda":
-                    for _ in range(min(4, len(machine_stack))):
-                        stack_to_restore.append(machine_stack.pop())
-                elif machine_stack:
-                    stack_to_restore.append(machine_stack.pop())
-                    
-                if machine_stack:
-                    rem_env = machine_stack[-1]
-                    if next_token.get_value() == rem_env.get_value():
-                        machine_stack.pop()
-                        if environment_tracker:
-                            environment_tracker.pop()
-                        curr_env = environment_tracker[-1] if environment_tracker else None
-                        
-                while stack_to_restore:
-                    machine_stack.append(stack_to_restore.pop())
-
-            # Handle variable lookup
-            elif (next_token.get_type() == "ID" and 
-                next_token.get_value() not in ["Print", "Isinteger", "Istruthvalue", "Isstring", 
-                                            "Istuple", "Isfunction", "Isdummy", "Stem", "Stern", "Conc"]):
-                temp = curr_env
-                found = False
-                while temp and not found:
-                    for var, temp_val in temp.boundVariable.items():
-                        if next_token.get_value() == var.get_value():
-                            for val in temp_val:
-                                machine_stack.append(val)
-                            found = True
-                            break
-                    temp = temp.prev
-                    
-                if not found:
-                    print(f"Error: Variable '{next_token.get_value()}' not found in environment")
-                    # FIXED: Don't return, just continue
-
-            # Handle operators
-            elif hasattr(self, 'isBinaryOperator') and (self.isBinaryOperator(next_token.get_value()) or next_token.get_value() in ["neg", "not"]):
-                op = next_token.get_value()
-                if self.isBinaryOperator(op):
-                    if len(machine_stack) < 2:
-                        print(f"Error: Insufficient operands for binary operator {op}")
-                        continue  # FIXED: Continue instead of return
-                    node1 = machine_stack.pop()
-                    node2 = machine_stack.pop()
-                    
-                    # Handle arithmetic operations
-                    if node1.get_type() == "INT" and node2.get_type() == "INT":
-                        num1 = int(node1.get_value())
-                        num2 = int(node2.get_value())
-                        result = None
-                        
-                        if op == "+":
-                            result = Tree.build_node(str(num2 + num1), "INT")
-                        elif op == "-":
-                            result = Tree.build_node(str(num2 - num1), "INT")
-                        elif op == "*":
-                            result = Tree.build_node(str(num2 * num1), "INT")
-                        elif op == "/":
-                            if num1 == 0:
-                                print("Error: Division by zero")
-                                continue
-                            result = Tree.build_node(str(num2 // num1), "INT")
-                        # Add other operators as needed
-                        
-                        if result:
-                            machine_stack.append(result)
-                            
-                elif op == "neg":
-                    if not machine_stack:
-                        print("Error: No operand for negation")
+                        print("Error: Empty machine stack for gamma")
                         continue
-                    node1 = machine_stack.pop()
-                    if node1.get_type() == "INT":
-                        num1 = int(node1.get_value())
-                        machine_stack.append(Tree.build_node(str(-num1), "INT"))
-
-            # Handle conditional (beta)
-            elif next_token.get_value() == "beta":
-                if len(machine_stack) < 1 or len(control) < 2:
-                    print("Error: Insufficient data for conditional")
-                    continue  # FIXED: Continue instead of return
-                bool_val = machine_stack.pop()
-                else_index = control.pop()
-                then_index = control.pop()
-                
-                try:
-                    index = int(then_index.get_value()) if bool_val.get_value() == "true" else int(else_index.get_value())
-                    if 0 <= index < len(control_struct):
-                        next_delta = control_struct[index]
-                        for node in reversed(next_delta):
-                            if node:  # FIXED: Check node exists
-                                control.append(node)
-                except (ValueError, IndexError) as e:
-                    print(f"Error in conditional: {e}")
-
-            # Handle tuple creation (tau)
-            elif next_token.get_value() == "tau":
-                if not control:
-                    print("Error: No count for tuple creation")
-                    continue  # FIXED: Continue instead of return
-                no_of_items = control.pop()
-                try:
-                    num_of_items = int(no_of_items.get_value())
-                    if len(machine_stack) < num_of_items:
-                        print("Error: Insufficient items for tuple creation")
-                        continue  # FIXED: Continue instead of return
                         
-                    tuple_node = Tree.build_node("tau", "tau")
-                    if num_of_items > 0:
-                        tuple_node.left_node = machine_stack.pop()
-                        current = tuple_node.left_node
-                        for _ in range(1, num_of_items):
-                            current.right_node = machine_stack.pop()
-                            current = current.right_node
-                    machine_stack.append(tuple_node)
-                except ValueError as e:
-                    print(f"Error in tuple creation: {e}")
+                    rator = machine_stack[-1]  # Don't pop yet
+                    
+                    if rator.get_value() == "lambda":
+                        # Lambda application
+                        machine_stack.pop()  # Remove lambda
+                        if len(machine_stack) < 3:
+                            print("Error: Insufficient elements for lambda application")
+                            continue
+                            
+                        env_node = machine_stack.pop()
+                        bound_var = machine_stack.pop()
+                        delta_index = machine_stack.pop()
+                        
+                        if not machine_stack:
+                            print("Error: No argument for lambda application")
+                            continue
+                        rand = machine_stack.pop()  # The argument
 
-            print()  # Empty line for readability
+                        # Create new environment
+                        new_env = Environment(name=f"env{curr_env_index}")
+                        
+                        # Find parent environment
+                        for env in reversed(environment_stack):
+                            if env.name == env_node.get_value():
+                                new_env.prev = env
+                                break
 
-        print("CSE machine execution completed")
+                        # Bind the parameter
+                        if bound_var.get_value() == "," and rand.get_value() == "tau":
+                            # Handle tuple unpacking for multiple parameters
+                            params = self.extract_comma_list(bound_var)
+                            values = self.extract_tau_elements(rand)
+                            
+                            for param, value in zip(params, values):
+                                param_key = Tree.build_node(param.get_value(), param.get_type())
+                                new_env.bound_variable[param_key] = [value]
+                        else:
+                            # Simple parameter binding
+                            param_key = Tree.build_node(bound_var.get_value(), bound_var.get_type())
+                            new_env.bound_variable[param_key] = [rand]
+
+                        # Update environment
+                        curr_env = new_env
+                        environment_stack.append(curr_env)
+                        curr_env_index += 1
+
+                        # Push new environment marker
+                        machine_stack.append(Tree.build_node(curr_env.name, "ENV"))
+                        control.append(Tree.build_node(curr_env.name, "ENV"))
+
+                        # Load the lambda body
+                        try:
+                            delta_idx = int(delta_index.get_value())
+                            if 0 <= delta_idx < len(control_struct):
+                                lambda_body = control_struct[delta_idx]
+                                for i in range(len(lambda_body) - 1, -1, -1):
+                                    if lambda_body[i] is not None:
+                                        control.append(lambda_body[i])
+                        except (ValueError, IndexError) as e:
+                            print(f"Error loading lambda body: {e}")
+
+                    elif rator.get_value() == "tau":
+                        # Tuple selection
+                        tau_node = machine_stack.pop()
+                        if not machine_stack:
+                            print("Error: No index for tuple selection")
+                            continue
+                        index_node = machine_stack.pop()
+                        
+                        try:
+                            index = int(index_node.get_value())
+                            elements = self.extract_tau_elements(tau_node)
+                            if 1 <= index <= len(elements):
+                                machine_stack.append(elements[index - 1])
+                            else:
+                                print(f"Error: Tuple index {index} out of range")
+                        except (ValueError, IndexError) as e:
+                            print(f"Error in tuple selection: {e}")
+
+                    elif rator.get_value() in ["Print", "Order", "Isinteger", "Istruthvalue", 
+                                             "Isstring", "Istuple", "Isfunction", "Isdummy"]:
+                        # Built-in function application
+                        func = machine_stack.pop()
+                        if machine_stack:
+                            arg = machine_stack.pop()
+                            result = self.apply_builtin_function(func.get_value(), arg)
+                            if result:
+                                machine_stack.append(result)
+
+                # Handle environment restoration
+                elif next_token.get_value().startswith("env"):
+                    # Save the current result
+                    result_stack = []
+                    while machine_stack and not machine_stack[-1].get_value().startswith("env"):
+                        result_stack.append(machine_stack.pop())
+                    
+                    # Remove environment marker
+                    if machine_stack and machine_stack[-1].get_value() == next_token.get_value():
+                        machine_stack.pop()
+                        if environment_stack:
+                            environment_stack.pop()
+                            curr_env = environment_stack[-1] if environment_stack else Environment()
+                    
+                    # Restore results
+                    for item in reversed(result_stack):
+                        machine_stack.append(item)
+
+                # Handle variable lookup
+                elif (next_token.get_type() == "ID" and 
+                    next_token.get_value() not in ["Print", "Order", "Isinteger", "Istruthvalue", 
+                                                "Isstring", "Istuple", "Isfunction", "Isdummy", 
+                                                "Stem", "Stern", "Conc"]):
+                    
+                    found = False
+                    temp_env = curr_env
+                    
+                    while temp_env and not found:
+                        print(f"Searching in env '{temp_env.name}': {[var.get_value() for var in temp_env.bound_variable.keys()]}")
+                        
+                        for var_key, values in temp_env.bound_variable.items():
+                            if var_key.get_value() == next_token.get_value():
+                                print(f"Found variable '{next_token.get_value()}' in env '{temp_env.name}'")
+                                for value in values:
+                                    machine_stack.append(value)
+                                found = True
+                                break
+                        
+                        temp_env = temp_env.prev
+                    
+                    if not found:
+                        print(f"Error: Variable '{next_token.get_value()}' not found")
+
+                # Handle operators
+                elif self.is_operator(next_token.get_value()):
+                    result = self.apply_operator(next_token.get_value(), machine_stack)
+                    if result:
+                        machine_stack.append(result)
+
+                # Handle conditional (beta)
+                elif next_token.get_value() == "beta":
+                    if len(machine_stack) < 1 or len(control) < 2:
+                        print("Error: Insufficient data for conditional")
+                        continue
+                        
+                    condition = machine_stack.pop()
+                    else_delta = control.pop()
+                    then_delta = control.pop()
+                    
+                    try:
+                        # Choose branch based on condition
+                        if condition.get_value() in ["true", "True"] or condition.get_value() == True:
+                            chosen_delta = then_delta
+                        else:
+                            chosen_delta = else_delta
+                            
+                        delta_idx = int(chosen_delta.get_value())
+                        if 0 <= delta_idx < len(control_struct):
+                            branch_control = control_struct[delta_idx]
+                            for i in range(len(branch_control) - 1, -1, -1):
+                                if branch_control[i] is not None:
+                                    control.append(branch_control[i])
+                    except (ValueError, IndexError) as e:
+                        print(f"Error in conditional: {e}")
+
+                # Handle tuple creation (tau)
+                elif next_token.get_value() == "tau":
+                    if not control:
+                        print("Error: No count for tau")
+                        continue
+                        
+                    count_node = control.pop()
+                    try:
+                        count = int(count_node.get_value())
+                        if len(machine_stack) < count:
+                            print(f"Error: Need {count} elements, have {len(machine_stack)}")
+                            continue
+                            
+                        # Create tau node
+                        tau_node = Tree.build_node("tau", "tau")
+                        if count > 0:
+                            # Pop elements and chain them
+                            elements = []
+                            for _ in range(count):
+                                elements.append(machine_stack.pop())
+                            elements.reverse()  # Restore original order
+                            
+                            # Chain elements using right_node
+                            tau_node.left_node = elements[0]
+                            current = tau_node.left_node
+                            for i in range(1, len(elements)):
+                                current.right_node = elements[i]
+                                current = current.right_node
+                                
+                        machine_stack.append(tau_node)
+                    except ValueError as e:
+                        print(f"Error in tau creation: {e}")
+
+                else:
+                    print(f"Unhandled token: {next_token.get_value()} ({next_token.get_type()})")
+
+            except Exception as e:
+                print(f"Error during execution: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
+        print("\nCSE machine execution completed")
         
         # Output final result
         if machine_stack:
-            final_result = machine_stack[-1]
-            print("Output of the above program is:")
-            if hasattr(self, 'cse_flag') and self.cse_flag == 1:
-                if final_result.get_type() == "STR":
-                    print(self.addSpaces(final_result.get_value()) if hasattr(self, 'addSpaces') else final_result.get_value())
+            # Find the actual result (skip environment markers)
+            result = None
+            for item in reversed(machine_stack):
+                if not item.get_value().startswith("env"):
+                    result = item
+                    break
+            
+            if result:
+                print("Output of the above program is:")
+                if result.get_type() == "STR":
+                    # Remove quotes from string output
+                    output = result.get_value()
+                    if output.startswith("'") and output.endswith("'"):
+                        output = output[1:-1]
+                    print(output)
                 else:
-                    print(final_result.get_value())
-                self.cse_flag = 0
+                    print(result.get_value())
             else:
-                print(final_result.get_value())
+                print("No result found")
         else:
-            print("Warning: Machine stack is empty at completion")
+            print("Warning: Empty machine stack")
 
 
     def arrangeTuple(self,tauNode, res):
