@@ -23,13 +23,13 @@ A complete implementation of an RPAL language processor including lexical analys
 
 ```bash
 # Execute an RPAL program
-python myrpal.py filename.rpal
+python myrpal.py filename.txt
 
 # Generate token sequence
-python myrpal.py -lex filename.rpal
+python myrpal.py -lex filename.txt
 
 # Generate Abstract Syntax Tree
-python myrpal.py -ast filename.rpal
+python myrpal.py -ast filename.txt
 
 # Generate Standardized Tree
-python myrpal.py -st filename.rpal
+python myrpal.py -st filename.txt
