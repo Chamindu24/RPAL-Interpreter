@@ -522,202 +522,169 @@ class Parser:
         if x is None:
             return
 
-        row = self.control_structures_row
-        column = self.control_structures_column
-
-        # Handle column overflow
-        if column >= 200:
-            row += 1
-            column = 0
-            self.control_structures_row = row
-
-        if row >= 200:  # Prevent row overflow
-            return
-
-        # Create node and add to control structure
-        controlNodeArray[row][column] = Tree.build_node(x.get_value(), x.get_type())
-        column += 1
-
-        # Update position
-        self.control_structures_column = column
-
-        # Process children recursively
-        if hasattr(x, 'left_node') and x.left_node:
-            self.build_control_structures(x.left_node, controlNodeArray)
-        if hasattr(x, 'right_node') and x.right_node:
-            self.build_control_structures(x.right_node, controlNodeArray)
-
-    def build_node(self, x, value, node_type):
-        """Builds control structures for special node types"""
-        print(f"build_node: Processing {x.get_value()} with value={value}, type={node_type}")
-
         # Handle lambda nodes
         if x.get_value() == "lambda":
-            row = self.control_structures_row
-            column = self.control_structures_column
-            index = self.control_structures_index
-
-            # Count existing rows to determine delta number
+            t_var_1 = self.control_structures_row
             counter = 0
+            
+            # Count existing rows to determine delta number
             temp_row = 0
-            while temp_row < len(self.controlNodeArray) and self.controlNodeArray[temp_row][0] is not None:
+            while temp_row < len(controlNodeArray) and controlNodeArray[temp_row][0] is not None:
                 temp_row += 1
                 counter += 1
-
+            
+            self.control_structures_index += 1
+            
             # Create delta number node
             delta_num = Tree.build_node(str(counter), "deltaNumber")
-            self.controlNodeArray[row][column] = delta_num
-            column += 1
-
-            # Add bound variable
-            if hasattr(x, 'left_node') and x.left_node:
-                self.controlNodeArray[row][column] = Tree.build_node(x.left_node.get_value(), x.left_node.get_type())
-                column += 1
-
-            # Add lambda node
-            self.controlNodeArray[row][column] = Tree.build_node("lambda", "lambda")
-            column += 1
-
-            # Save current position
-            saved_row = row
-            saved_column = column
-
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = delta_num
+            self.control_structures_column += 1
+            
+            # Add bound variable (left_node)
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = x.left_node
+            self.control_structures_column += 1
+            
+            # Add lambda node itself
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = x
+            self.control_structures_column += 1
+            
+            saved_index = self.control_structures_row
+            tempj = self.control_structures_column
+            
             # Move to next available row for lambda body
-            while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
-                row += 1
-
-            # Update position for recursion
-            self.control_structures_row = row
+            while (self.control_structures_row < len(controlNodeArray) and 
+                controlNodeArray[self.control_structures_row][0] is not None):
+                self.control_structures_row += 1
+            
             self.control_structures_column = 0
-            self.control_structures_index = index + 1
-
+            
             # Process lambda body
             if hasattr(x, 'left_node') and x.left_node and hasattr(x.left_node, 'right_node'):
-                self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
-
+                self.build_control_structures(x.left_node.right_node, controlNodeArray)
+            
             # Restore position
-            self.control_structures_row = saved_row
-            self.control_structures_column = saved_column
-            return
+            self.control_structures_row = saved_index
+            self.control_structures_column = tempj
 
         # Handle conditional nodes "->"
         elif x.get_value() == "->":
-            row = self.control_structures_row
-            column = self.control_structures_column
-            index = self.control_structures_index
-
-            # Create delta numbers for then and else branches
-            then_delta = Tree.build_node(str(index), "deltaNumber")
-            else_delta = Tree.build_node(str(index + 1), "deltaNumber")
-            beta_node = Tree.build_node("beta", "beta")
-
-            self.controlNodeArray[row][column] = then_delta
-            column += 1
-            self.controlNodeArray[row][column] = else_delta
-            column += 1
-            self.controlNodeArray[row][column] = beta_node
-            column += 1
-
-            # Save current state
-            saved_row = row
-            saved_column = column
-
-            # Process condition first
-            if hasattr(x, 'left_node') and x.left_node:
-                self.build_control_structures(x.left_node, self.controlNodeArray)
-
-            # Move to next row for then branch
-            while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
-                row += 1
+            saved_index = self.control_structures_row
+            tempj = self.control_structures_column
+            nextDelta = self.control_structures_index
+            counter = self.control_structures_row
             
-            then_row = row
-            self.control_structures_row = row
+            # Create first delta number
+            temp1 = Tree.build_node(str(nextDelta), "deltaNumber")
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = temp1
+            self.control_structures_column += 1
+            
+            # Create second delta number
+            nextToNextDelta = self.control_structures_index
+            temp2 = Tree.build_node(str(nextToNextDelta), "deltaNumber")
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = temp2
+            self.control_structures_column += 1
+            
+            # Create beta node
+            beta = Tree.build_node("beta", "beta")
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = beta
+            self.control_structures_column += 1
+            
+            # Count rows to find first index
+            while (counter < len(controlNodeArray) and 
+                controlNodeArray[counter][0] is not None):
+                counter += 1
+            
+            firstIndex = counter
+            lamdaCount = self.control_structures_index
+            
+            # Process condition (left_node)
+            self.build_control_structures(x.left_node, controlNodeArray)
+            diffLc = self.control_structures_index - lamdaCount
+            
+            # Move to next row for then branch
+            while (self.control_structures_row < len(controlNodeArray) and 
+                controlNodeArray[self.control_structures_row][0] is not None):
+                self.control_structures_row += 1
             self.control_structures_column = 0
-            self.control_structures_index = index + 2
-
+            
             # Process then branch
             if (hasattr(x, 'left_node') and x.left_node and 
-                hasattr(x.left_node, 'right_node') and x.left_node.right_node):
-                self.build_control_structures(x.left_node.right_node, self.controlNodeArray)
-
+                hasattr(x.left_node, 'right_node')):
+                self.build_control_structures(x.left_node.right_node, controlNodeArray)
+            
             # Move to next row for else branch
-            while row < len(self.controlNodeArray) and self.controlNodeArray[row][0] is not None:
-                row += 1
-
-            else_row = row
-            self.control_structures_row = row
+            while (self.control_structures_row < len(controlNodeArray) and 
+                controlNodeArray[self.control_structures_row][0] is not None):
+                self.control_structures_row += 1
             self.control_structures_column = 0
-
+            
             # Process else branch
             if (hasattr(x, 'left_node') and x.left_node and 
                 hasattr(x.left_node, 'right_node') and x.left_node.right_node and
-                hasattr(x.left_node.right_node, 'right_node') and x.left_node.right_node.right_node):
-                self.build_control_structures(x.left_node.right_node.right_node, self.controlNodeArray)
-
+                hasattr(x.left_node.right_node, 'right_node')):
+                self.build_control_structures(x.left_node.right_node.right_node, controlNodeArray)
+            
             # Update delta numbers with actual row indices
-            self.controlNodeArray[saved_row][saved_column - 3].set_value(str(then_row))
-            self.controlNodeArray[saved_row][saved_column - 2].set_value(str(else_row))
-
-            # Restore position
-            self.control_structures_row = saved_row
-            self.control_structures_column = saved_column
+            if diffLc == 0 or self.control_structures_row < lamdaCount:
+                controlNodeArray[saved_index][tempj].set_value(str(firstIndex))
+            else:
+                controlNodeArray[saved_index][tempj].set_value(str(self.control_structures_row - 1))
+            
+            controlNodeArray[saved_index][tempj + 1].set_value(str(self.control_structures_row))
+            
+            # Restore position and count columns
+            self.control_structures_row = saved_index
+            self.control_structures_column = 0
+            
+            while (self.control_structures_column < len(controlNodeArray[0]) and 
+                controlNodeArray[self.control_structures_row][self.control_structures_column] is not None):
+                self.control_structures_column += 1
+            
             self.control_structures_beta += 2
-            return
 
         # Handle tau nodes (tuples)
         elif x.get_value() == "tau":
-            row = self.control_structures_row
-            column = self.control_structures_column
-
-            # Count children
-            child_count = 0
-            current = x.left_node if hasattr(x, 'left_node') else None
-            while current:
-                child_count += 1
-                current = current.right_node if hasattr(current, 'right_node') else None
-
-            # Add count and tau node
-            count_node = Tree.build_node(str(child_count), "CHILDCOUNT")
-            tau_node = Tree.build_node("tau", "tau")
+            tauLeft = x.left_node if hasattr(x, 'left_node') else None
+            numOfChildren = 0
             
-            self.controlNodeArray[row][column] = count_node
-            column += 1
-            self.controlNodeArray[row][column] = tau_node
-            column += 1
-
-            # Update position
-            self.control_structures_row = row
-            self.control_structures_column = column
-
-            # Process all children
-            current = x.left_node if hasattr(x, 'left_node') else None
-            while current:
-                self.build_control_structures(current, self.controlNodeArray)
+            # Count children
+            while tauLeft is not None:
+                numOfChildren += 1
+                tauLeft = tauLeft.right_node if hasattr(tauLeft, 'right_node') else None
+            
+            # Add count node
+            countNode = Tree.build_node(str(numOfChildren), "CHILDCOUNT")
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = countNode
+            self.control_structures_column += 1
+            
+            # Add tau node
+            tauNode = Tree.build_node("tau", "tau")
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = tauNode
+            self.control_structures_column += 1
+            
+            # Process first child
+            self.build_control_structures(x.left_node, controlNodeArray)
+            
+            # Process remaining children
+            current = x.left_node
+            while current is not None:
+                if hasattr(current, 'right_node'):
+                    self.build_control_structures(current.right_node, controlNodeArray)
                 current = current.right_node if hasattr(current, 'right_node') else None
-
-            return
 
         # Handle other nodes
         else:
-            row = self.control_structures_row
-            column = self.control_structures_column
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = Tree.build_node(x.get_value(), x.get_type())
+            self.control_structures_column += 1
+            
+            # Process left child
+            self.build_control_structures(x.left_node, controlNodeArray)
+            
+            # Process right child of left node (if exists)
+            if x.left_node is not None and hasattr(x.left_node, 'right_node'):
+                self.build_control_structures(x.left_node.right_node, controlNodeArray)
 
-            if column >= 200:
-                row += 1
-                column = 0
-                self.control_structures_row = row
-
-            if row < 200:
-                self.controlNodeArray[row][column] = Tree.build_node(x.get_value(), x.get_type())
-                column += 1
-                self.control_structures_column = column
-
-                # Process children
-                if hasattr(x, 'left_node') and x.left_node:
-                    self.build_control_structures(x.left_node, self.controlNodeArray)
-                if hasattr(x, 'right_node') and x.right_node:
-                    self.build_control_structures(x.right_node, self.controlNodeArray)
-
+    
     def cse_machine(self, control_struct):
         """Main CSE machine execution engine"""
         print("Starting CSE machine execution...")
@@ -756,9 +723,9 @@ class Parser:
                 if not next_token:
                     continue
                     
-                print(f"\nProcessing token: {next_token.get_value()} ({next_token.get_type()})")
-                print(f"Control stack: {[node.get_value() if node else 'None' for node in list(control)[-5:]]}")  # Show last 5
-                print(f"Machine stack: {[node.get_value() if node else 'None' for node in list(machine_stack)[-5:]]}")  # Show last 5
+                #print(f"\nProcessing token: {next_token.get_value()} ({next_token.get_type()})")
+                #print(f"Control stack: {[node.get_value() if node else 'None' for node in list(control)[-5:]]}")  # Show last 5
+                #print(f"Machine stack: {[node.get_value() if node else 'None' for node in list(machine_stack)[-5:]]}")  # Show last 5
 
                 # Handle nil tokens
                 if next_token.get_value() == "nil":
