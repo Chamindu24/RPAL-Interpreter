@@ -36,6 +36,7 @@ class Parser:
         self.index = row
         self.tree = Tree()
         self.tree.read_line = read_array[:10000]  # Store up to first 10,000 characters
+        
         self.size_of_file = size
         self.ast_flag = af
         self.parsing_complete = False
@@ -79,10 +80,11 @@ class Parser:
         return s.is_digit()
     
     def read(self, val, type):
+        
         #print(f"read: Expecting value={val}, type={type}")
         if val != self.next_token.get_value() or type != self.next_token.get_type():
-            #print(f'Parse error: Expected "{val}", but "{self.next_token.get_value()}" was found')
-            sys.exit(0)
+            print(f'Parse error: Expected "{val}" ({type}), but "{self.next_token.get_value()}" ({self.next_token.get_type()}) was found at index {self.index}')
+            raise ValueError(f"Parse error at index {self.index}")
         
         if type in ("ID", "INT", "STR"):
             self.buildTree(val, type, 0)
@@ -96,6 +98,8 @@ class Parser:
         #print(f"read: Skipped DELETE token, next token is now {self.next_token.get_value()} ({self.next_token.get_type()})")
 
     def buildTree(self, val, type, child):
+        
+        
         #print(f"buildTree: Building node value={val}, type={type}, children={child}, stack size before: {len(self.st)}")
         if child == 0:
             temp = Tree.build_node(val, type)
@@ -131,22 +135,20 @@ class Parser:
 
     def get_token(self):
         row = self.index
-        Tree.read = self.tree.read_line  # Assuming this is initialized properly elsewhere
+        Tree.read = self.tree.read_line
+        if not hasattr(Tree, 'read') or not Tree.read:
+            
+            print("Error: Tree.read is not initialized")
+            return Token("EOF", "EOF")
         
-        # Debug: show current reading index and character
         current_char = Tree.read[row] if row < self.size_of_file else 'EOF'
-        #print(f"get_token: Called with self.index={self.index}, current char: '{current_char}'")
+        #print(f"get_token: Current index: {row}, character: '{current_char}'")
         
-        # End of file or null char check
         if row >= self.size_of_file or Tree.read[row] == '\0':
-            t = Token("EOF", "EOF")
-            #print("get_token: Reached EOF")
-            return t
+            return Token("EOF", "EOF")
         
-        # Main tokenization loop
         while row < self.size_of_file and row < 10000 and Tree.read[row] != '\0':
             c = Tree.read[row]
-            #print(f"get_token: Processing char '{c}' at index {row}")
             
             # Integer token
             if self.is_digit(c):
@@ -156,7 +158,6 @@ class Parser:
                     row += 1
                 self.index = row
                 t = Token("INT", num)
-                #print(f"get_token: Created INT token: value={t.get_value()}, type={t.get_type()}")
                 with open("output_token_sequence.txt", "a") as outputFile:
                     outputFile.write(f"<INTEGER> {num}\n")
                 return t
@@ -167,18 +168,14 @@ class Parser:
                 while row < self.size_of_file and (self.is_alpha(Tree.read[row]) or self.is_digit(Tree.read[row]) or Tree.read[row] == '_'):
                     id_str += Tree.read[row]
                     row += 1
-                
+                self.index = row
                 if self.is_reserved_key(id_str):
-                    self.index = row
                     t = Token("KEYWORD", id_str)
-                    #print(f"get_token: Created KEYWORD token: value={t.get_value()}, type={t.get_type()}")
                     with open("output_token_sequence.txt", "a") as outputFile:
-                        outputFile.write(f"<KEYWORD> {id_str}\n")
+                        outputFile.write(f"<IDENTIFIER> {id_str}\n")  # Match C++
                     return t
                 else:
-                    self.index = row
                     t = Token("ID", id_str)
-                    #print(f"get_token: Created ID token: value={t.get_value()}, type={t.get_type()}")
                     with open("output_token_sequence.txt", "a") as outputFile:
                         outputFile.write(f"<IDENTIFIER> {id_str}\n")
                     return t
@@ -192,8 +189,7 @@ class Parser:
                 if row < self.size_of_file and Tree.read[row] == '\n':
                     row += 1
                 self.index = row
-                t = Token("COMMENT", comment)
-                #print(f"get_token: Created COMMENT token: value={t.get_value()}, type={t.get_type()}")
+                t = Token("DELETE", comment)
                 with open("output_token_sequence.txt", "a") as outputFile:
                     outputFile.write(f"<COMMENT> {comment}\n")
                 return t
@@ -206,12 +202,11 @@ class Parser:
                     row += 1
                 self.index = row
                 t = Token("OPERATOR", op)
-                #print(f"get_token: Created OPERATOR token: value={t.get_value()}, type={t.get_type()}")
                 with open("output_token_sequence.txt", "a") as outputFile:
                     outputFile.write(f"<OPERATOR> {op}\n")
                 return t
             
-            # String literal token (single quotes)
+            # String literal token
             elif c == '\'':
                 string_lit = "'"
                 row += 1
@@ -224,13 +219,15 @@ class Parser:
                     elif ch == '\\':
                         row += 1
                         if row < self.size_of_file:
-                            string_lit += Tree.read[row]
-                            row += 1
+                            if Tree.read[row] in ('t', 'n', '\\', '"'):
+                                string_lit += Tree.read[row]
+                                row += 1
+                            else:
+                                row += 1  # Skip invalid escape
                     else:
                         row += 1
                 self.index = row
                 t = Token("STR", string_lit)
-                #print(f"get_token: Created STR token: value={t.get_value()}, type={t.get_type()}")
                 with open("output_token_sequence.txt", "a") as outputFile:
                     outputFile.write(f"<STRING> {string_lit}\n")
                 return t
@@ -238,37 +235,33 @@ class Parser:
             # Punctuation token
             elif c in (')', '(', ';', ','):
                 self.index = row + 1
-                t = Token("PUNCTUATION", c)
-                #print(f"get_token: Created PUNCTUATION token: value={t.get_value()}, type={t.get_type()}")
+                t = Token("PUNCTUATION", c)  # Match C++ (or PUNCTUATION if fixed)
                 with open("output_token_sequence.txt", "a") as outputFile:
                     outputFile.write(f"<PUNCTUATION> {c}\n")
                 return t
             
-            # Whitespace token (skip and do not output)
+            # Whitespace token
             elif c.isspace():
+                space = ""
                 while row < self.size_of_file and Tree.read[row].isspace():
+                    space += Tree.read[row]
                     row += 1
                 self.index = row
-                #print(f"get_token: Skipped whitespace, updated self.index to {self.index}")
-                # Return a special token or continue loop to get next token
-                continue
+                return Token("DELETE", space)
             
-            # Unknown token (single char)
+            # Unknown token
             else:
                 self.index = row + 1
                 t = Token("UNKNOWN", c)
-                #print(f"get_token: Created UNKNOWN token: value={t.get_value()}, type={t.get_type()}")
                 return t
         
-        #print(f"get_token: Reached end of input at index {row}")
         return Token("EOF", "EOF")
 
     
     def parse(self):
-        print("Starting parsing process...")
+        print("Starting parsing process...........................................................")
 
         self.next_token = self.get_token()  # Initialize the first token
-        #print(f"Initial token: {self.next_token.get_value()} ({self.next_token.get_type()})")
 
         while self.next_token.get_type() == "DELETE":
             self.next_token = self.get_token()
@@ -288,10 +281,10 @@ class Parser:
 
             if self.ast_flag == 1 and t:
                 t.display_syntax_tree(0)
-
+            print("✅ Syntax Tree Root Node:", t.get_value() if t else "None")
             if t:
                 self.MST(t)
-                print("Made standard tree (MST) from syntax tree.")
+                print("✅ MST Root Node:", t.get_value())
 
                 if self.ast_flag == 2:
                     t.display_syntax_tree(0)
@@ -357,6 +350,7 @@ class Parser:
 
             self.cse_machine(controlNodeArray)
 
+
         self.parsing_complete = True
 
     def isParsingComplete(self):
@@ -370,150 +364,156 @@ class Parser:
     def makeStandardTree(self, t):
         if t is None:
             return None
-        
-        # Debug: Trace the node being processed
-        # print(f"makeStandardTree: Processing node with value={t.get_value()}, type={t.get_type()}")
 
-        # Recursively standardize left and right subtrees
+        # Recursively standardize children first
         self.makeStandardTree(t.left_node)
         self.makeStandardTree(t.right_node)
 
         val = t.get_value()
-        # print(f"makeStandardTree: Transforming node: value={val}")
 
         if val == "let":
             if t.left_node and t.left_node.get_value() == "=":
                 # Transform let X = E in P to gamma(lambda(X, P), E)
                 t.set_value("gamma")
                 t.set_type("KEYWORD")
-                P = t.left_node.right_node  # Entire P subtree
-                X = t.left_node.left_node   # Entire X subtree
-                E = t.left_node.left_node.right_node  # Entire E subtree
+                P = t.right_node  # P is the right child of let
+                X = t.left_node.left_node
+                E = t.left_node.right_node
                 t.left_node = Tree.build_node("lambda", "KEYWORD")
-                t.left_node.right_node = P
                 t.left_node.left_node = X
-                t.left_node.left_node.right_node = E
+                t.left_node.right_node = P
+                t.right_node = E
                 # print(f"makeStandardTree: Transformed 'let' to gamma-lambda structure")
 
-        elif val == "and" and t.left_node and t.left_node.get_value() == "=":
+        elif val == "and" and t.left_node:
             # Transform and (X1=E1, X2=E2, ...) to =(, (X1, X2, ...), tau(E1, E2, ...))
             equal = t.left_node
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = Tree.build_node(",", "PUNCTUATION")
             comma = t.left_node
-            comma.left_node = equal.left_node  # First variable
-            t.left_node.right_node = Tree.build_node("tau", "KEYWORD")
-            tau = t.left_node.right_node
-            tau.left_node = equal.left_node.right_node  # First expression
+            comma.left_node = equal.left_node
+            t.right_node = Tree.build_node("tau", "KEYWORD")
+            tau = t.right_node
+            tau.left_node = equal.right_node
             tau_current = tau.left_node
             comma_current = comma.left_node
             equal = equal.right_node
-
             while equal is not None:
                 comma_current.right_node = equal.left_node
                 comma_current = comma_current.right_node
-                tau_current.right_node = equal.left_node.right_node
+                tau_current.right_node = equal.right_node
                 tau_current = tau_current.right_node
                 equal = equal.right_node
             # print(f"makeStandardTree: Transformed 'and' to =-comma-tau structure")
 
         elif val == "where":
-            if t.left_node and t.left_node.right_node and t.left_node.right_node.get_value() == "=":
+            if t.right_node and t.right_node.get_value() == "=":
                 # Transform P where X = E to gamma(lambda(X, P), E)
                 t.set_value("gamma")
                 t.set_type("KEYWORD")
-                P = t.left_node  # Entire P subtree
-                X = t.left_node.right_node.left_node
-                E = t.left_node.right_node.left_node.right_node
+                P = t.left_node
+                X = t.right_node.left_node
+                E = t.right_node.right_node
                 t.left_node = Tree.build_node("lambda", "KEYWORD")
                 t.left_node.right_node = P
                 t.left_node.left_node = X
-                t.left_node.left_node.right_node = E
+                t.right_node = E
                 # print(f"makeStandardTree: Transformed 'where' to gamma-lambda structure")
 
         elif val == "within":
-            if t.left_node and t.left_node.get_value() == "=" and t.left_node.right_node and t.left_node.right_node.get_value() == "=":
+            if t.left_node and t.right_node and t.left_node.get_value() == "=" and t.right_node.get_value() == "=":
                 # Transform X1 = E1 within X2 = E2 to =(X2, gamma(lambda(X1, E2), E1))
                 X1 = t.left_node.left_node
-                E1 = t.left_node.left_node.right_node
-                X2 = t.left_node.right_node.left_node
-                E2 = t.left_node.right_node.left_node.right_node
+                E1 = t.left_node.right_node
+                X2 = t.right_node.left_node
+                E2 = t.right_node.right_node
                 t.set_value("=")
                 t.set_type("KEYWORD")
                 t.left_node = X2
-                t.left_node.right_node = Tree.build_node("gamma", "KEYWORD")
-                temp = t.left_node.right_node
+                t.right_node = Tree.build_node("gamma", "KEYWORD")
+                temp = t.right_node
                 temp.left_node = Tree.build_node("lambda", "KEYWORD")
                 temp.left_node.right_node = E2
                 temp.left_node.left_node = X1
-                temp.left_node.left_node.right_node = E1
+                temp.right_node = E1
                 # print(f"makeStandardTree: Transformed 'within' to =-gamma-lambda structure")
 
         elif val == "rec" and t.left_node and t.left_node.get_value() == "=":
             # Transform rec X = E to =(X, gamma(YSTAR, lambda(X, E)))
             X = t.left_node.left_node
-            E = t.left_node.left_node.right_node
+            E = t.left_node.right_node
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = X
-            t.left_node.right_node = Tree.build_node("gamma", "KEYWORD")
-            gamma = t.left_node.right_node
+            t.right_node = Tree.build_node("gamma", "KEYWORD")
+            gamma = t.right_node
             gamma.left_node = Tree.build_node("YSTAR", "KEYWORD")
-            ystar = gamma.left_node
-            ystar.right_node = Tree.build_node("lambda", "KEYWORD")
-            ystar.right_node.left_node = X
-            ystar.right_node.left_node.right_node = E
+            gamma.right_node = Tree.build_node("lambda", "KEYWORD")
+            gamma.right_node.left_node = X
+            gamma.right_node.right_node = E
             # print(f"makeStandardTree: Transformed 'rec' to =-gamma-YSTAR-lambda structure")
 
         elif val == "function_form":
             # Transform function_form P V1 V2 ... Vn E to =(P, lambda(V1, lambda(V2, ... lambda(Vn, E))))
             P = t.left_node
-            V = t.left_node.right_node
+            V = t.right_node
             t.set_value("=")
             t.set_type("KEYWORD")
             t.left_node = P
             temp = t
-            while V and V.right_node and V.right_node.right_node is not None:
-                temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
-                temp = temp.left_node.right_node
+            while V and V.right_node:
+                temp.right_node = Tree.build_node("lambda", "KEYWORD")
+                temp = temp.right_node
                 temp.left_node = V
                 V = V.right_node
-            temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
-            temp = temp.left_node.right_node
+            temp.right_node = Tree.build_node("lambda", "KEYWORD")
+            temp = temp.right_node
             temp.left_node = V
-            temp.left_node.right_node = V.right_node
+            temp.right_node = V.right_node if V else None
             # print(f"makeStandardTree: Transformed 'function_form' to =-lambda chain")
 
         elif val == "lambda":
-            if t.left_node is not None:
+            if t.left_node and t.right_node:
                 # Transform lambda V1 V2 ... Vn E to lambda(V1, lambda(V2, ... lambda(Vn, E)))
                 V = t.left_node
                 temp = t
-                while V.right_node and V.right_node.right_node is not None:
-                    temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
-                    temp = temp.left_node.right_node
+                while V.right_node:
+                    temp.right_node = Tree.build_node("lambda", "KEYWORD")
+                    temp = temp.right_node
                     temp.left_node = V
                     V = V.right_node
-                temp.left_node.right_node = Tree.build_node("lambda", "KEYWORD")
-                temp = temp.left_node.right_node
+                temp.right_node = Tree.build_node("lambda", "KEYWORD")
+                temp = temp.right_node
                 temp.left_node = V
-                temp.left_node.right_node = V.right_node
+                temp.right_node = t.right_node
                 # print(f"makeStandardTree: Transformed 'lambda' with multiple parameters")
 
         elif val == "@":
-            if t.left_node and t.left_node.right_node and t.left_node.right_node.right_node:
+            if t.left_node and t.right_node and t.right_node.right_node:
                 # Transform E1 @ N E2 to gamma(gamma(N, E1), E2)
                 E1 = t.left_node
-                N = t.left_node.right_node
-                E2 = t.left_node.right_node.right_node
+                N = t.right_node
+                E2 = t.right_node.right_node
                 t.set_value("gamma")
                 t.set_type("KEYWORD")
                 t.left_node = Tree.build_node("gamma", "KEYWORD")
-                t.left_node.right_node = E2
                 t.left_node.left_node = N
-                t.left_node.left_node.right_node = E1
+                t.left_node.right_node = E1
+                t.right_node = E2
                 # print(f"makeStandardTree: Transformed '@' to gamma-gamma structure")
+
+        elif val == "," and t.left_node and t.right_node:
+            # Transform comma-separated expressions to tau
+            t.set_value("tau")
+            t.set_type("KEYWORD")
+            # Ensure all children are chained correctly
+            current = t
+            while current.right_node:
+                current.right_node.set_value("tau")
+                current.right_node.set_type("KEYWORD")
+                current = current.right_node
+            # print(f"makeStandardTree: Transformed ',' to tau structure")
 
         return None
     
@@ -522,12 +522,40 @@ class Parser:
         if x is None:
             return
 
+        #print(f"Building control structures for node: {x.get_value()}")
+
+        # Handle gamma nodes (function application)
+        if x.get_value() == "gamma":
+            # Process argument (right_node) first, then function (left_node)
+            self.build_control_structures(x.right_node, controlNodeArray)
+            self.build_control_structures(x.left_node, controlNodeArray)
+            # Add gamma node itself
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = Tree.build_node(x.get_value(), x.get_type())
+            self.control_structures_column += 1
+
+        # Handle = nodes (e.g., for rec definitions)
+        elif x.get_value() == "=":
+            # Process right_node (expression) first, then left_node (variable)
+            self.build_control_structures(x.right_node, controlNodeArray)
+            self.build_control_structures(x.left_node, controlNodeArray)
+            # Add = node
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = Tree.build_node(x.get_value(), x.get_type())
+            self.control_structures_column += 1
+
+        # Handle YSTAR nodes (recursion)
+        elif x.get_value() == "YSTAR":
+            # Add YSTAR node
+            controlNodeArray[self.control_structures_row][self.control_structures_column] = Tree.build_node(x.get_value(), x.get_type())
+            self.control_structures_column += 1
+            # Process right_node (lambda)
+            self.build_control_structures(x.right_node, controlNodeArray)
+
         # Handle lambda nodes
-        if x.get_value() == "lambda":
+        elif x.get_value() == "lambda":
             t_var_1 = self.control_structures_row
             counter = 0
             
-            # Count existing rows to determine delta number
+            # Count existing rows for delta number
             temp_row = 0
             while temp_row < len(controlNodeArray) and controlNodeArray[temp_row][0] is not None:
                 temp_row += 1
@@ -540,11 +568,11 @@ class Parser:
             controlNodeArray[self.control_structures_row][self.control_structures_column] = delta_num
             self.control_structures_column += 1
             
-            # Add bound variable (left_node)
+            # Add bound variable
             controlNodeArray[self.control_structures_row][self.control_structures_column] = x.left_node
             self.control_structures_column += 1
             
-            # Add lambda node itself
+            # Add lambda node
             controlNodeArray[self.control_structures_row][self.control_structures_column] = x
             self.control_structures_column += 1
             
@@ -579,7 +607,7 @@ class Parser:
             self.control_structures_column += 1
             
             # Create second delta number
-            nextToNextDelta = self.control_structures_index
+            nextToNextDelta = self.control_structures_index + 1  # Fix: Increment for second delta
             temp2 = Tree.build_node(str(nextToNextDelta), "deltaNumber")
             controlNodeArray[self.control_structures_row][self.control_structures_column] = temp2
             self.control_structures_column += 1
@@ -608,8 +636,7 @@ class Parser:
             self.control_structures_column = 0
             
             # Process then branch
-            if (hasattr(x, 'left_node') and x.left_node and 
-                hasattr(x.left_node, 'right_node')):
+            if hasattr(x, 'left_node') and x.left_node and hasattr(x.left_node, 'right_node'):
                 self.build_control_structures(x.left_node.right_node, controlNodeArray)
             
             # Move to next row for else branch
@@ -625,17 +652,15 @@ class Parser:
                 self.build_control_structures(x.left_node.right_node.right_node, controlNodeArray)
             
             # Update delta numbers with actual row indices
-            if diffLc == 0 or self.control_structures_row < lamdaCount:
-                controlNodeArray[saved_index][tempj].set_value(str(firstIndex))
-            else:
-                controlNodeArray[saved_index][tempj].set_value(str(self.control_structures_row - 1))
+            controlNodeArray[saved_index][tempj].set_value(str(firstIndex))
+            controlNodeArray[saved_index][tempj + 1].set_value(str(firstIndex + 1))
             
-            controlNodeArray[saved_index][tempj + 1].set_value(str(self.control_structures_row))
+            # Increment index for next delta
+            self.control_structures_index += 2
             
-            # Restore position and count columns
+            # Restore position
             self.control_structures_row = saved_index
             self.control_structures_column = 0
-            
             while (self.control_structures_column < len(controlNodeArray[0]) and 
                 controlNodeArray[self.control_structures_row][self.control_structures_column] is not None):
                 self.control_structures_column += 1
@@ -662,27 +687,19 @@ class Parser:
             controlNodeArray[self.control_structures_row][self.control_structures_column] = tauNode
             self.control_structures_column += 1
             
-            # Process first child
-            self.build_control_structures(x.left_node, controlNodeArray)
-            
-            # Process remaining children
+            # Process children
             current = x.left_node
             while current is not None:
-                if hasattr(current, 'right_node'):
-                    self.build_control_structures(current.right_node, controlNodeArray)
+                self.build_control_structures(current, controlNodeArray)
                 current = current.right_node if hasattr(current, 'right_node') else None
 
-        # Handle other nodes
+        # Handle other nodes (e.g., identifiers, operators, literals)
         else:
             controlNodeArray[self.control_structures_row][self.control_structures_column] = Tree.build_node(x.get_value(), x.get_type())
             self.control_structures_column += 1
-            
-            # Process left child
+            # Process both left and right children
             self.build_control_structures(x.left_node, controlNodeArray)
-            
-            # Process right child of left node (if exists)
-            if x.left_node is not None and hasattr(x.left_node, 'right_node'):
-                self.build_control_structures(x.left_node.right_node, controlNodeArray)
+            self.build_control_structures(x.right_node, controlNodeArray)
 
     
     def cse_machine(self, control_struct):
